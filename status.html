@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>과학실 사용 현황 | 안산동산고등학교</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <a class="brand" href="index.html">🔬 안산동산고 과학실 예약</a>
+      <nav>
+        <a href="apply.html">사용 신청</a>
+        <a href="status.html" class="active">사용 현황</a>
+        <a href="admin.html">담당자</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>과학실 사용 현황 확인</h1>
+    <p class="subtitle">실험실·날짜·시간별 신청 현황입니다. 항목을 누르면 자세한 내용을 볼 수 있습니다.</p>
+    <div id="storage-note" class="notice" hidden></div>
+
+    <div class="card">
+      <div class="filters">
+        <div>
+          <label class="field" for="date">날짜</label>
+          <div style="display:flex;gap:6px">
+            <button class="btn secondary small" id="prev" type="button" aria-label="이전 날">◀</button>
+            <input type="date" id="date">
+            <button class="btn secondary small" id="next" type="button" aria-label="다음 날">▶</button>
+          </div>
+        </div>
+        <div>
+          <label class="field" for="lab">실험실</label>
+          <select id="lab"></select>
+        </div>
+        <div>
+          <label class="field" for="status">상태</label>
+          <select id="status"></select>
+        </div>
+      </div>
+      <div class="legend" style="margin-top:14px">
+        상태: <span id="legend"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1.1rem" id="table-title"></h2>
+      <div class="table-wrap">
+        <table class="timetable" id="timetable"></table>
+      </div>
+      <p class="hint">빈 칸을 누르면 해당 실험실·날짜·시간으로 바로 신청할 수 있습니다.</p>
+    </div>
+  </main>
+
+  <dialog id="detail">
+    <div class="dlg-body">
+      <h2>신청 내용</h2>
+      <dl class="detail" id="detail-body"></dl>
+      <div class="actions">
+        <button class="btn secondary" type="button" onclick="this.closest('dialog').close()">닫기</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+  <script>
+    (function () {
+      const cfg = window.APP_CONFIG;
+      const $ = (id) => document.getElementById(id);
+      const E = Util.escape;
+      let all = [];
+
+      const params = new URLSearchParams(location.search);
+      $("date").value = params.get("date") || Util.today();
+      $("lab").innerHTML =
+        '<option value="">전체</option>' + cfg.labs.map((l) => `<option>${E(l)}</option>`).join("");
+      $("status").innerHTML =
+        '<option value="">전체</option>' + cfg.statuses.map((s) => `<option>${E(s)}</option>`).join("");
+      $("legend").innerHTML = cfg.statuses.map((s) => Util.badge(s)).join(" ");
+
+      function shiftDate(days) {
+        const d = new Date($("date").value + "T00:00:00");
+        d.setDate(d.getDate() + days);
+        const pad = (n) => String(n).padStart(2, "0");
+        $("date").value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        render();
+      }
+      $("prev").onclick = () => shiftDate(-1);
+      $("next").onclick = () => shiftDate(1);
+      ["date", "lab", "status"].forEach((id) => $(id).addEventListener("change", render));
+
+      function render() {
+        const date = $("date").value;
+        const labs = $("lab").value ? [$("lab").value] : cfg.labs;
+        const status = $("status").value;
+        const items = all.filter((r) => r.date === date && (!status || r.status === status));
+
+        const d = new Date(date + "T00:00:00");
+        $("table-title").textContent = isNaN(d)
+          ? "날짜를 선택하세요"
+          : d.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+
+        let html = "<thead><tr><th>시간</th>" + labs.map((l) => `<th>${E(l)}</th>`).join("") + "</tr></thead><tbody>";
+        for (const p of cfg.periods) {
+          html += `<tr><th>${E(p)}</th>`;
+          for (const lab of labs) {
+            const cell = items.filter((r) => r.lab === lab && r.periods.includes(p));
+            if (cell.length) {
+              html += "<td>" + cell.map((r) =>
+                `<div class="slot-item ${Util.statusClass(r.status)}" data-id="${E(r.id)}">
+                  ${Util.badge(r.status)} ${E(r.applicant)}<br>
+                  <span class="hint" style="margin:0">${E(r.purpose)}</span>
+                </div>`).join("") + "</td>";
+            } else {
+              html += `<td class="empty" data-lab="${E(lab)}" data-period="${E(p)}" style="cursor:pointer">—</td>`;
+            }
+          }
+          html += "</tr>";
+        }
+        $("timetable").innerHTML = html + "</tbody>";
+      }
+
+      $("timetable").addEventListener("click", (e) => {
+        const item = e.target.closest(".slot-item");
+        if (item) return showDetail(item.dataset.id);
+        const empty = e.target.closest("td.empty");
+        if (empty && $("date").value >= Util.today()) {
+          location.href = `apply.html?lab=${encodeURIComponent(empty.dataset.lab)}` +
+            `&date=${encodeURIComponent($("date").value)}&period=${encodeURIComponent(empty.dataset.period)}`;
+        }
+      });
+
+      function showDetail(id) {
+        const r = all.find((x) => x.id === id);
+        if (!r) return;
+        const rows = [
+          ["상태", Util.badge(r.status)],
+          ["실험실", E(r.lab)],
+          ["날짜", E(r.date)],
+          ["시간", E(r.periods.join(", "))],
+          ["신청자", E(r.applicant)],
+          ["지도 선생님", E(r.teacher)],
+          ["사용 목적", E(r.purpose)],
+          ["실험 계획", E(r.plan)],
+          ["신청 일시", E(Util.formatDateTime(r.createdAt))],
+        ];
+        if (r.adminNote) rows.push(["담당자 메모", E(r.adminNote)]);
+        $("detail-body").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+        $("detail").showModal();
+      }
+
+      render();
+      Store.list().then((list) => { all = list; render(); })
+        .catch((e) => { $("table-title").textContent = "불러오기 실패: " + e.message; });
+    })();
+  </script>
+</body>
+</html>

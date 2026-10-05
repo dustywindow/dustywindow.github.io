@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>과학실 사용 신청 | 안산동산고등학교</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <a class="brand" href="index.html">🔬 안산동산고 과학실 예약</a>
+      <nav>
+        <a href="apply.html" class="active">사용 신청</a>
+        <a href="status.html">사용 현황</a>
+        <a href="admin.html">담당자</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>과학실 사용 신청</h1>
+    <p class="subtitle">아래 양식을 작성해 제출하면 담당 선생님이 확인 후 승인합니다.</p>
+    <div id="storage-note" class="notice" hidden></div>
+
+    <form id="apply-form" class="card" novalidate>
+      <div class="form-grid">
+        <div>
+          <label class="field" for="applicant">신청자 (학번 이름) <span class="req">*</span></label>
+          <input type="text" id="applicant" placeholder="예: 20315 홍길동" required>
+        </div>
+        <div>
+          <label class="field" for="teacher">지도 선생님 <span class="req">*</span></label>
+          <input type="text" id="teacher" placeholder="예: 김화학 선생님" required>
+        </div>
+
+        <div>
+          <label class="field" for="lab">사용하려는 실험실 <span class="req">*</span></label>
+          <select id="lab" required></select>
+        </div>
+        <div>
+          <label class="field" for="date">사용 날짜 <span class="req">*</span></label>
+          <input type="date" id="date" required>
+        </div>
+
+        <div class="full">
+          <label class="field">사용 시간 <span class="req">*</span></label>
+          <div id="periods" class="period-grid"></div>
+          <p class="hint">여러 시간을 선택할 수 있습니다. 이미 승인된 시간은 선택할 수 없습니다.</p>
+        </div>
+
+        <div class="full">
+          <label class="field" for="purpose">사용 목적 <span class="req">*</span></label>
+          <input type="text" id="purpose" placeholder="예: 화학 탐구 동아리 산·염기 적정 실험" required>
+        </div>
+
+        <div class="full">
+          <label class="field" for="plan">실험 계획 <span class="req">*</span></label>
+          <textarea id="plan" placeholder="실험 주제, 준비물, 진행 순서, 안전 수칙 등을 적어 주세요." required></textarea>
+        </div>
+      </div>
+
+      <p id="form-error" class="error" hidden></p>
+
+      <div class="actions">
+        <a class="btn secondary" href="index.html">취소</a>
+        <button type="submit" class="btn">신청서 제출</button>
+      </div>
+    </form>
+
+    <div id="done" class="card success-box" hidden>
+      <div class="icon">✅</div>
+      <h2>신청이 접수되었습니다</h2>
+      <p id="done-summary" class="subtitle"></p>
+      <div class="actions" style="justify-content:center">
+        <a class="btn" href="status.html" id="done-status-link">사용 현황 보기</a>
+        <a class="btn secondary" href="apply.html">새 신청서 작성</a>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+  <script>
+    (function () {
+      const cfg = window.APP_CONFIG;
+      const $ = (id) => document.getElementById(id);
+      const form = $("apply-form");
+      let all = [];
+
+      $("lab").innerHTML =
+        '<option value="">실험실을 선택하세요</option>' +
+        cfg.labs.map((l) => `<option>${Util.escape(l)}</option>`).join("");
+
+      $("date").min = Util.today();
+      $("date").value = Util.today();
+
+      const params = new URLSearchParams(location.search);
+      if (params.get("lab") && cfg.labs.includes(params.get("lab"))) $("lab").value = params.get("lab");
+      if (params.get("date")) $("date").value = params.get("date");
+
+      function renderPeriods() {
+        const lab = $("lab").value;
+        const date = $("date").value;
+        const checked = new Set(
+          [...document.querySelectorAll("#periods input:checked")].map((i) => i.value)
+        );
+        if (params.get("period")) {
+          checked.add(params.get("period"));
+          params.delete("period");
+        }
+        const taken = new Set(
+          all
+            .filter((r) => r.lab === lab && r.date === date && r.status === "승인")
+            .flatMap((r) => r.periods)
+        );
+        $("periods").innerHTML = cfg.periods
+          .map((p) => {
+            const isTaken = taken.has(p);
+            return `<label class="${isTaken ? "taken" : ""}" title="${isTaken ? "이미 승인된 시간" : ""}">
+              <input type="checkbox" value="${Util.escape(p)}" ${isTaken ? "disabled" : ""}
+                ${!isTaken && checked.has(p) ? "checked" : ""}> ${Util.escape(p)}
+            </label>`;
+          })
+          .join("");
+      }
+
+      $("lab").addEventListener("change", renderPeriods);
+      $("date").addEventListener("change", renderPeriods);
+
+      Store.list()
+        .then((list) => { all = list; })
+        .catch(() => {})
+        .finally(renderPeriods);
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const err = $("form-error");
+        err.hidden = true;
+
+        const data = {
+          applicant: $("applicant").value.trim(),
+          teacher: $("teacher").value.trim(),
+          lab: $("lab").value,
+          date: $("date").value,
+          periods: Util.sortPeriods(
+            [...document.querySelectorAll("#periods input:checked")].map((i) => i.value)
+          ),
+          purpose: $("purpose").value.trim(),
+          plan: $("plan").value.trim(),
+        };
+
+        const missing = [];
+        if (!data.applicant) missing.push("신청자");
+        if (!data.teacher) missing.push("지도 선생님");
+        if (!data.lab) missing.push("실험실");
+        if (!data.date) missing.push("날짜");
+        if (!data.periods.length) missing.push("사용 시간");
+        if (!data.purpose) missing.push("사용 목적");
+        if (!data.plan) missing.push("실험 계획");
+        if (missing.length) {
+          err.textContent = "다음 항목을 입력해 주세요: " + missing.join(", ");
+          err.hidden = false;
+          return;
+        }
+        if (data.date < Util.today()) {
+          err.textContent = "지난 날짜는 신청할 수 없습니다.";
+          err.hidden = false;
+          return;
+        }
+
+        const btn = form.querySelector("button[type=submit]");
+        btn.disabled = true;
+        try {
+          // 제출 직전에 다시 확인해 이미 승인된 시간과 겹치지 않도록 함
+          all = await Store.list();
+          const conflict = all.find(
+            (r) => r.lab === data.lab && r.date === data.date && r.status === "승인" &&
+              r.periods.some((p) => data.periods.includes(p))
+          );
+          if (conflict) {
+            renderPeriods();
+            err.textContent = "선택한 시간 중 이미 승인된 시간이 있습니다. 다시 선택해 주세요.";
+            err.hidden = false;
+            return;
+          }
+
+          const now = new Date().toISOString();
+          await Store.add({ ...data, status: "신청", adminNote: "", createdAt: now, updatedAt: now });
+
+          form.hidden = true;
+          $("done").hidden = false;
+          $("done-summary").textContent =
+            `${data.lab} · ${data.date} · ${data.periods.join(", ")} — 현재 상태: 신청`;
+          $("done-status-link").href =
+            `status.html?date=${encodeURIComponent(data.date)}`;
+        } catch (ex) {
+          err.textContent = "제출에 실패했습니다: " + ex.message;
+          err.hidden = false;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
