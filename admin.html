@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>담당자 페이지 | 안산동산고등학교</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <a class="brand" href="index.html">🔬 안산동산고 과학실 예약</a>
+      <nav>
+        <a href="apply.html">사용 신청</a>
+        <a href="status.html">사용 현황</a>
+        <a href="admin.html" class="active">담당자</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>담당자 페이지</h1>
+    <p class="subtitle">제출된 신청서를 확인하고 상태(신청 · 확인보류 · 승인)를 변경합니다.</p>
+    <div id="storage-note" class="notice" hidden></div>
+
+    <form id="login" class="card" style="max-width:420px">
+      <label class="field" for="pw">담당자 비밀번호</label>
+      <input type="password" id="pw" autocomplete="current-password" autofocus>
+      <p id="login-error" class="error" hidden>비밀번호가 올바르지 않습니다.</p>
+      <div class="actions"><button class="btn" type="submit">로그인</button></div>
+    </form>
+
+    <section id="panel" hidden>
+      <div class="stats" id="stats"></div>
+
+      <div class="card">
+        <div class="filters">
+          <div>
+            <label class="field" for="f-status">상태</label>
+            <select id="f-status"></select>
+          </div>
+          <div>
+            <label class="field" for="f-lab">실험실</label>
+            <select id="f-lab"></select>
+          </div>
+          <div>
+            <label class="field" for="f-date">날짜</label>
+            <input type="date" id="f-date">
+          </div>
+          <div>
+            <label class="field" for="f-q">검색</label>
+            <input type="text" id="f-q" placeholder="신청자, 선생님, 목적">
+          </div>
+          <div style="flex:0;min-width:auto;display:flex;gap:6px">
+            <button class="btn secondary" type="button" id="reset">초기화</button>
+            <button class="btn secondary" type="button" id="logout">로그아웃</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>상태</th><th>사용 날짜</th><th>시간</th><th>실험실</th>
+                <th>신청자</th><th>지도 선생님</th><th>사용 목적</th><th>신청 일시</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="detail">
+    <form class="dlg-body" id="detail-form" method="dialog">
+      <h2>신청서 확인</h2>
+      <dl class="detail" id="detail-body"></dl>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+      <label class="field">상태 변경</label>
+      <div class="legend" id="status-radios"></div>
+
+      <label class="field" for="note" style="margin-top:12px">담당자 메모 <span class="hint">(신청자에게 현황 페이지에서 보입니다)</span></label>
+      <textarea id="note" style="min-height:70px" placeholder="예: 실험 계획에 안전 장비 항목을 추가해 주세요."></textarea>
+
+      <p id="detail-warn" class="error" hidden></p>
+
+      <div class="actions">
+        <button class="btn danger" type="button" id="delete">삭제</button>
+        <span style="flex:1"></span>
+        <button class="btn secondary" type="button" onclick="this.closest('dialog').close()">닫기</button>
+        <button class="btn" type="button" id="save">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+  <script>
+    (function () {
+      const cfg = window.APP_CONFIG;
+      const $ = (id) => document.getElementById(id);
+      const E = Util.escape;
+      const AUTH_KEY = "labAdminAuthed";
+      let all = [];
+      let current = null;
+
+      function isAuthed() {
+        try { return sessionStorage.getItem(AUTH_KEY) === "1"; } catch (e) { return false; }
+      }
+
+      $("login").addEventListener("submit", (e) => {
+        e.preventDefault();
+        if ($("pw").value === cfg.adminPassword) {
+          try { sessionStorage.setItem(AUTH_KEY, "1"); } catch (e) {}
+          showPanel();
+        } else {
+          $("login-error").hidden = false;
+        }
+      });
+
+      $("logout").onclick = () => {
+        try { sessionStorage.removeItem(AUTH_KEY); } catch (e) {}
+        location.reload();
+      };
+
+      $("f-status").innerHTML =
+        '<option value="">전체</option>' + cfg.statuses.map((s) => `<option>${E(s)}</option>`).join("");
+      $("f-lab").innerHTML =
+        '<option value="">전체</option>' + cfg.labs.map((l) => `<option>${E(l)}</option>`).join("");
+      ["f-status", "f-lab", "f-date"].forEach((id) => $(id).addEventListener("change", render));
+      $("f-q").addEventListener("input", render);
+      $("reset").onclick = () => {
+        ["f-status", "f-lab", "f-date", "f-q"].forEach((id) => ($(id).value = ""));
+        render();
+      };
+
+      $("status-radios").innerHTML = cfg.statuses
+        .map((s) => `<label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="radio" name="st" value="${E(s)}"> ${Util.badge(s)}</label>`)
+        .join("");
+
+      async function load() {
+        all = await Store.list();
+        render();
+      }
+
+      function render() {
+        const counts = Object.fromEntries(cfg.statuses.map((s) => [s, 0]));
+        all.forEach((r) => { if (r.status in counts) counts[r.status]++; });
+        $("stats").innerHTML =
+          `<div class="stat"><div class="num">${all.length}</div><div class="lbl">전체 신청</div></div>` +
+          cfg.statuses.map((s) =>
+            `<div class="stat"><div class="num">${counts[s]}</div><div class="lbl">${Util.badge(s)}</div></div>`
+          ).join("");
+
+        const st = $("f-status").value, lab = $("f-lab").value, date = $("f-date").value;
+        const q = $("f-q").value.trim().toLowerCase();
+        const rows = all.filter((r) =>
+          (!st || r.status === st) && (!lab || r.lab === lab) && (!date || r.date === date) &&
+          (!q || [r.applicant, r.teacher, r.purpose].join(" ").toLowerCase().includes(q))
+        );
+
+        $("rows").innerHTML = rows.length
+          ? rows.map((r) => `<tr>
+              <td>${Util.badge(r.status)}</td>
+              <td>${E(r.date)}</td>
+              <td>${E(r.periods.join(", "))}</td>
+              <td>${E(r.lab)}</td>
+              <td>${E(r.applicant)}</td>
+              <td>${E(r.teacher)}</td>
+              <td>${E(r.purpose)}</td>
+              <td>${E(Util.formatDateTime(r.createdAt))}</td>
+              <td><button class="btn small" data-id="${E(r.id)}">확인</button></td>
+            </tr>`).join("")
+          : '<tr><td colspan="9" class="empty" style="text-align:center;padding:24px">해당하는 신청서가 없습니다.</td></tr>';
+      }
+
+      $("rows").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-id]");
+        if (btn) openDetail(btn.dataset.id);
+      });
+
+      function conflictsFor(r) {
+        return all.filter((x) => x.id !== r.id && x.status === "승인" && x.lab === r.lab &&
+          x.date === r.date && x.periods.some((p) => r.periods.includes(p)));
+      }
+
+      function openDetail(id) {
+        current = all.find((r) => r.id === id);
+        if (!current) return;
+        const r = current;
+        $("detail-body").innerHTML = [
+          ["현재 상태", Util.badge(r.status)],
+          ["실험실", E(r.lab)],
+          ["날짜", E(r.date)],
+          ["시간", E(r.periods.join(", "))],
+          ["신청자", E(r.applicant)],
+          ["지도 선생님", E(r.teacher)],
+          ["사용 목적", E(r.purpose)],
+          ["실험 계획", E(r.plan)],
+          ["신청 일시", E(Util.formatDateTime(r.createdAt))],
+          ["최종 수정", E(Util.formatDateTime(r.updatedAt))],
+        ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+        document.querySelectorAll('input[name="st"]').forEach((i) => (i.checked = i.value === r.status));
+        $("note").value = r.adminNote || "";
+        $("detail-warn").hidden = true;
+        $("detail").showModal();
+      }
+
+      $("save").onclick = async () => {
+        if (!current) return;
+        const status = document.querySelector('input[name="st"]:checked')?.value || current.status;
+        if (status === "승인") {
+          const c = conflictsFor(current);
+          if (c.length) {
+            $("detail-warn").textContent =
+              "같은 실험실·시간에 이미 승인된 신청이 있습니다: " +
+              c.map((x) => `${x.applicant} (${x.periods.join(", ")})`).join(" / ");
+            $("detail-warn").hidden = false;
+            return;
+          }
+        }
+        try {
+          await Store.update(current.id, {
+            status, adminNote: $("note").value.trim(), updatedAt: new Date().toISOString(),
+          });
+          $("detail").close();
+          await load();
+        } catch (e) {
+          $("detail-warn").textContent = "저장 실패: " + e.message;
+          $("detail-warn").hidden = false;
+        }
+      };
+
+      $("delete").onclick = async () => {
+        if (!current || !confirm("이 신청서를 삭제할까요? 되돌릴 수 없습니다.")) return;
+        try {
+          await Store.remove(current.id);
+          $("detail").close();
+          await load();
+        } catch (e) {
+          $("detail-warn").textContent = "삭제 실패: " + e.message;
+          $("detail-warn").hidden = false;
+        }
+      };
+
+      function showPanel() {
+        $("login").hidden = true;
+        $("panel").hidden = false;
+        load().catch((e) => alert("불러오기 실패: " + e.message));
+      }
+
+      if (isAuthed()) showPanel();
+    })();
+  </script>
+</body>
+</html>
