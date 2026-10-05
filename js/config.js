@@ -19,7 +19,7 @@ window.APP_CONFIG = {
   // Firebase 설정 (선택).
   // 비워 두면 이 브라우저의 localStorage에만 저장되어 다른 기기와 공유되지 않습니다.
   // 여러 사람이 함께 쓰려면 Firebase 콘솔에서 Firestore를 만들고 웹 앱 설정값을 넣으세요.
-  firebase: const firebaseConfig = {
+  firebase: {
     apiKey: "AIzaSyDfgaj6fjy99AJvpSwGMzkmNl5WHl05HOQ",
     authDomain: "dchs-sciencelab.firebaseapp.com",
     databaseURL: "https://dchs-sciencelab-default-rtdb.firebaseio.com",
