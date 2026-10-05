@@ -26,6 +26,6 @@ window.APP_CONFIG = {
     projectId: "dchs-sciencelab",
     storageBucket: "dchs-sciencelab.firebasestorage.app",
     messagingSenderId: "771418796868",
-    appId: "1:771418796868:web:31f857a6f14645ece39d11"
+    appId: "1:771418796868:web:91b83adaa95f12e5e39d11"
   },
 };
